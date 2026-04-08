@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hangman Game</title>
+
+  <!-- Google Fonts: display title + readable body -->
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;900&family=DM+Sans:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ═══════════════════════════════════════════
+       CSS CUSTOM PROPERTIES (design tokens)
+       ═══════════════════════════════════════════ */
+    :root {
+      --bg:          #0f1117;
+      --surface:     #181c27;
+      --surface-2:   #1e2334;
+      --border:      #2a2f42;
+      --text:        #e2e8f5;
+      --muted:       #606880;
+      --accent:      #4f8ef7;
+      --accent-glow: rgba(79,142,247,.20);
+      --correct:     #34d399;
+      --correct-bg:  rgba(52,211,153,.12);
+      --wrong:       #f87171;
+      --wrong-bg:    rgba(248,113,113,.10);
+      --gold:        #fbbf24;
+      --radius:      14px;
+      --font-title:  'Unbounded', sans-serif;
+      --font-body:   'DM Sans', sans-serif;
+      --transition:  0.22s ease;
+    }
+
+    /* ═══════════════════════════════════════════
+       RESET & BASE
+       ═══════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 16px;
+      line-height: 1.5;
+      background-image: radial-gradient(
+        ellipse 70% 40% at 50% -5%,
+        rgba(79,142,247,.08) 0%,
+        transparent 70%
+      );
+      padding: 2rem 1rem 5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* ═══════════════════════════════════════════
+       HEADER
+       ═══════════════════════════════════════════ */
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    header h1 {
+      font-family: var(--font-title);
+      font-size: clamp(1.8rem, 6vw, 3rem);
+      font-weight: 900;
+      background: linear-gradient(90deg, #fff 30%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+    }
+    header p {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-top: 0.4rem;
+      font-style: italic;
+    }
+
+    /* ═══════════════════════════════════════════
+       MAIN LAYOUT  (2 columns → 1 on mobile)
+       ═══════════════════════════════════════════ */
+    .game-grid {
+      width: 100%;
+      max-width: 900px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.2rem;
+    }
+
+    /* ═══════════════════════════════════════════
+       CARD
+       ═══════════════════════════════════════════ */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(145deg, rgba(255,255,255,.025) 0%, transparent 55%);
+      pointer-events: none;
+      border-radius: var(--radius);
+    }
+    .card-label {
+      font-size: 0.72rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    /* ═══════════════════════════════════════════
+       GALLOWS CARD  (left column, row 1)
+       ═══════════════════════════════════════════ */
+    .gallows-card {
+      grid-column: 1;
+      grid-row: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 270px;
+    }
+    #hangman-svg {
+      width: 100%;
+      max-width: 230px;
+      height: auto;
+      overflow: visible;
+    }
+
+    /*
+      Body parts: hidden by default (opacity:0).
+      JS adds .show to reveal; .final triggers flash on the last part.
+    */
+    .bp {
+      opacity: 0;
+      transition: opacity 0.35s ease;
+    }
+    .bp.show { opacity: 1; }
+
+    /* Flash animation on the death-blow body part */
+    @keyframes flash-red {
+      0%,100% { filter: none; }
+      25%      { filter: drop-shadow(0 0 12px #f87171) brightness(1.6); }
+      75%      { filter: drop-shadow(0 0 6px #f87171); }
+    }
+    .bp.final { animation: flash-red 0.7s ease 0.1s; }
+
+    /* Shake the whole SVG when the hangman is complete */
+    @keyframes svg-shake {
+      0%,100% { transform: translateX(0) rotate(0deg); }
+      15%     { transform: translateX(-8px) rotate(-2deg); }
+      35%     { transform: translateX(8px) rotate(2deg); }
+      55%     { transform: translateX(-5px) rotate(-1deg); }
+      75%     { transform: translateX(5px); }
+    }
+    #hangman-svg.shake { animation: svg-shake 0.55s ease; }
+
+    /* ═══════════════════════════════════════════
+       INFO PANEL  (right column, row 1)
+       ═══════════════════════════════════════════ */
+    .info-card {
+      grid-column: 2;
+      grid-row: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 1.2rem;
+    }
+
+    /* Life pips */
+    .lives-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .lives-pips { display: flex; gap: 6px; }
+    .pip {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--gold);
+      box-shadow: 0 0 6px rgba(251,191,36,.5);
+      transition: background var(--transition), box-shadow var(--transition), transform 0.3s;
+    }
+    .pip.lost {
+      background: var(--border);
+      box-shadow: none;
+      transform: scale(0.75);
+    }
+
+    /* Counter badges */
+    .counters { display: flex; gap: 0.7rem; }
+    .counter-badge {
+      flex: 1;
+      text-align: center;
+      padding: 0.55rem 0.5rem;
+      border-radius: 10px;
+      font-weight: 500;
+    }
+    .counter-badge .num {
+      font-family: var(--font-title);
+      font-size: 1.5rem;
+      line-height: 1;
+      display: block;
+    }
+    .counter-badge .lbl {
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      opacity: 0.7;
+    }
+    .counter-badge.c-wrong   { background: var(--wrong-bg);   color: var(--wrong);   border: 1px solid rgba(248,113,113,.2); }
+    .counter-badge.c-correct { background: var(--correct-bg); color: var(--correct); border: 1px solid rgba(52,211,153,.2); }
+
+    /* Category hint */
+    .hint-box {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.6rem 1rem;
+      font-size: 0.88rem;
+    }
+    .hint-box span { color: var(--accent); font-weight: 500; }
+
+    /* Guessed-letter chips */
+    .chips-wrap { display: flex; flex-wrap: wrap; gap: 6px; min-height: 32px; }
+    .chip {
+      padding: 3px 11px;
+      border-radius: 20px;
+      font-family: var(--font-title);
+      font-size: 0.75rem;
+      border: 1px solid;
+      letter-spacing: 0.05em;
+    }
+    .chip.hit  { background: var(--correct-bg); border-color: var(--correct); color: var(--correct); }
+    .chip.miss { background: var(--wrong-bg);   border-color: var(--wrong);   color: var(--wrong);   }
+
+    /* ═══════════════════════════════════════════
+       WORD DISPLAY  (spans both columns)
+       ═══════════════════════════════════════════ */
+    .word-card {
+      grid-column: 1 / -1;
+      text-align: center;
+    }
+    .slots-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      justify-content: center;
+      padding: 0.5rem 0;
+    }
+    .slot {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+    }
+    .slot-letter {
+      font-family: var(--font-title);
+      font-size: clamp(1.4rem, 4vw, 2rem);
+      min-width: 28px;
+      text-align: center;
+      color: var(--accent);
+      opacity: 0;
+      transform: translateY(-10px) scale(0.8);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+    .slot-letter.revealed {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    .slot-line {
+      width: 28px;
+      height: 3px;
+      border-radius: 3px;
+      background: var(--border);
+      transition: background var(--transition);
+    }
+    .slot.revealed .slot-line { background: var(--accent); }
+
+    /* ═══════════════════════════════════════════
+       ON-SCREEN KEYBOARD
+       ═══════════════════════════════════════════ */
+    .keyboard-card { grid-column: 1 / -1; }
+    .keys { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; }
+    .key {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-family: var(--font-title);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background var(--transition), border-color var(--transition),
+                  color var(--transition), transform 0.12s;
+    }
+    .key:not(:disabled):hover {
+      background: var(--accent-glow);
+      border-color: var(--accent);
+      color: var(--accent);
+      transform: translateY(-3px);
+    }
+    .key:not(:disabled):active { transform: translateY(0); }
+    .key:disabled { cursor: default; }
+    .key.hit  { background: var(--correct-bg); border-color: var(--correct); color: var(--correct); opacity: 0.85; }
+    .key.miss { background: var(--wrong-bg);   border-color: var(--wrong);   color: var(--wrong);   opacity: 0.6;  }
+
+    /* ═══════════════════════════════════════════
+       WIN / LOSE BANNER
+       ═══════════════════════════════════════════ */
+    .status-card {
+      grid-column: 1 / -1;
+      display: none;
+      text-align: center;
+      padding: 2rem 1.5rem;
+      border-radius: var(--radius);
+      border: 1px solid;
+      animation: fadeUp 0.45s ease forwards;
+    }
+    .status-card.win  { background: var(--correct-bg); border-color: var(--correct); }
+    .status-card.lose { background: var(--wrong-bg);   border-color: var(--wrong);   }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0);    }
+    }
+
+    .status-icon  { font-size: 2.8rem; line-height: 1; margin-bottom: 0.4rem; }
+    .status-title {
+      font-family: var(--font-title);
+      font-size: clamp(1.4rem, 4vw, 2.2rem);
+      margin-bottom: 0.25rem;
+    }
+    .win  .status-title { color: var(--correct); }
+    .lose .status-title { color: var(--wrong);   }
+    .status-sub { color: var(--muted); font-style: italic; margin-bottom: 1.2rem; }
+
+    .btn-restart {
+      padding: 0.65rem 2.2rem;
+      border-radius: 30px;
+      border: 1.5px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+      font-family: var(--font-title);
+      font-size: 0.82rem;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      transition: background var(--transition), color var(--transition), box-shadow var(--transition);
+    }
+    .btn-restart:hover {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 24px var(--accent-glow);
+    }
+
+    /* ═══════════════════════════════════════════
+       RESPONSIVE  – stack to 1 column on mobile
+       ═══════════════════════════════════════════ */
+    @media (max-width: 580px) {
+      .game-grid     { grid-template-columns: 1fr; }
+      .gallows-card  { grid-column: 1; grid-row: 1; min-height: 200px; }
+      .info-card     { grid-column: 1; grid-row: 2; }
+      .word-card     { grid-row: 3; }
+      .keyboard-card { grid-row: 4; }
+      .status-card   { grid-row: 5; }
+      #hangman-svg   { max-width: 160px; }
+      .key           { width: 37px; height: 37px; font-size: 0.72rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     HEADER
+     ══════════════════════════════════════════ -->
+<header>
+  <h1>Hangman</h1>
+  <p>Guess the word — you have 6 chances before the rope tightens.</p>
+</header>
+
+<!-- ══════════════════════════════════════════
+     GAME GRID
+     ══════════════════════════════════════════ -->
+<main class="game-grid" id="game-grid">
+
+  <!-- ─── 1. Gallows (SVG drawing) ──────── -->
+  <section class="card gallows-card" aria-label="Hangman drawing">
+    <!--
+      Gallows SVG structure:
+      • The structural frame (posts, rope) is always visible.
+      • Each body part has class="bp" (body-part).
+        It starts invisible (opacity:0 via CSS).
+      • JavaScript adds class "show" to reveal parts one-by-one.
+      • The FINAL part also receives class "final" which
+        triggers a red flash animation (defined in CSS above).
+      • The whole SVG gets class "shake" via JS on game over.
+    -->
+    <svg id="hangman-svg" viewBox="0 0 200 240"
+         xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+
+      <!-- Static frame: always visible -->
+      <g stroke="#3a4060" stroke-width="3" stroke-linecap="round" fill="none">
+        <line x1="20"  y1="228" x2="180" y2="228"/> <!-- ground   -->
+        <line x1="55"  y1="228" x2="55"  y2="18"/>  <!-- post     -->
+        <line x1="55"  y1="18"  x2="135" y2="18"/>  <!-- top beam -->
+        <line x1="135" y1="18"  x2="135" y2="44"/>  <!-- rope     -->
+        <line x1="55"  y1="50"  x2="90"  y2="18"/>  <!-- brace    -->
+      </g>
+
+      <!-- Body parts — revealed in this order: -->
+
+      <!-- WRONG GUESS 1: Head -->
+      <circle id="bp-head" class="bp"
+        cx="135" cy="60" r="16"
+        stroke="#4f8ef7" stroke-width="2.5" fill="none"/>
+
+      <!-- WRONG GUESS 2: Torso -->
+      <line id="bp-body" class="bp"
+        x1="135" y1="76" x2="135" y2="135"
+        stroke="#4f8ef7" stroke-width="2.5" stroke-linecap="round"/>
+
+      <!-- WRONG GUESS 3: Left arm -->
+      <line id="bp-larm" class="bp"
+        x1="135" y1="92" x2="112" y2="116"
+        stroke="#4f8ef7" stroke-width="2.5" stroke-linecap="round"/>
+
+      <!-- WRONG GUESS 4: Right arm -->
+      <line id="bp-rarm" class="bp"
+        x1="135" y1="92" x2="158" y2="116"
+        stroke="#4f8ef7" stroke-width="2.5" stroke-linecap="round"/>
+
+      <!-- WRONG GUESS 5: Left leg -->
+      <line id="bp-lleg" class="bp"
+        x1="135" y1="135" x2="112" y2="168"
+        stroke="#4f8ef7" stroke-width="2.5" stroke-linecap="round"/>
+
+      <!-- WRONG GUESS 6: Right leg → GAME OVER (turns red + flashes) -->
+      <line id="bp-rleg" class="bp"
+        x1="135" y1="135" x2="158" y2="168"
+        stroke="#f87171" stroke-width="2.5" stroke-linecap="round"/>
+
+    </svg>
+  </section>
+
+  <!-- ─── 2. Info panel ─────────────────── -->
+  <section class="card info-card" aria-label="Game info">
+
+    <!-- Lives: gold pips (one per allowed wrong guess) -->
+    <div>
+      <p class="card-label">Lives remaining</p>
+      <div class="lives-row">
+        <div class="lives-pips" id="lives-pips"></div>
+        <!-- Wrong / correct counters -->
+        <div class="counters">
+          <div class="counter-badge c-wrong">
+            <span class="num" id="wrong-count">0</span>
+            <span class="lbl">Wrong</span>
+          </div>
+          <div class="counter-badge c-correct">
+            <span class="num" id="correct-count">0</span>
+            <span class="lbl">Correct</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Word category hint -->
+    <div class="hint-box">
+      Category: <span id="category-text">—</span>
+    </div>
+
+    <!-- Guessed letters (chips) -->
+    <div>
+      <p class="card-label">Guessed letters</p>
+      <div class="chips-wrap" id="chips-wrap"></div>
+    </div>
+
+  </section>
+
+  <!-- ─── 3. Word display ───────────────── -->
+  <section class="card word-card" aria-label="Word display">
+    <p class="card-label card-label-center">The word</p>
+    <!-- Each letter slot rendered by JS -->
+    <div class="slots-row" id="slots-row"
+         role="status" aria-live="polite"></div>
+  </section>
+
+  <!-- ─── 4. On-screen keyboard ─────────── -->
+  <section class="card keyboard-card" aria-label="Letter keyboard">
+    <p class="card-label">Choose a letter</p>
+    <div class="keys" id="keys-grid"
+         role="group" aria-label="Alphabet buttons"></div>
+  </section>
+
+  <!-- ─── 5. Win / Lose banner ──────────── -->
+  <!--
+    Hidden initially (display:none).
+    JS sets class "win" or "lose" + display:"block" when game ends.
+    The fadeUp animation is triggered by re-assigning the class.
+  -->
+  <div class="status-card" id="status-card"
+       role="alert" aria-live="assertive">
+    <div class="status-icon"  id="status-icon"></div>
+    <p  class="status-title" id="status-title"></p>
+    <p  class="status-sub"   id="status-sub"></p>
+    <button class="btn-restart" id="btn-restart">Play Again</button>
+  </div>
+
+</main>
+
+
+<!-- ══════════════════════════════════════════
+     JAVASCRIPT  –  Full Game Logic
+     ══════════════════════════════════════════ -->
+<script>
+/* ═══════════════════════════════════════════════════
+   SECTION 1 — WORD BANK
+   Array of objects: { word (UPPERCASE), category }
+   UPPERCASE simplifies comparison (no need to .toLowerCase).
+   ═══════════════════════════════════════════════════ */
+const WORD_BANK = [
+  // Programming
+  { word: "JAVASCRIPT", category: "Programming" },
+  { word: "PYTHON",     category: "Programming" },
+  { word: "FUNCTION",   category: "Programming" },
+  { word: "VARIABLE",   category: "Programming" },
+  { word: "RECURSION",  category: "Programming" },
+  { word: "CALLBACK",   category: "Programming" },
+  { word: "PROMISE",    category: "Programming" },
+  // Technology
+  { word: "DATABASE",   category: "Technology"  },
+  { word: "ALGORITHM",  category: "Technology"  },
+  { word: "FRAMEWORK",  category: "Technology"  },
+  { word: "BROWSER",    category: "Technology"  },
+  { word: "NETWORK",    category: "Technology"  },
+  { word: "COMPILER",   category: "Technology"  },
+  // Animals
+  { word: "ELEPHANT",   category: "Animals"     },
+  { word: "PENGUIN",    category: "Animals"     },
+  { word: "CHEETAH",    category: "Animals"     },
+  { word: "DOLPHIN",    category: "Animals"     },
+  { word: "PLATYPUS",   category: "Animals"     },
+  // Nature
+  { word: "VOLCANO",    category: "Nature"      },
+  { word: "BLIZZARD",   category: "Nature"      },
+  { word: "THUNDER",    category: "Nature"      },
+  { word: "CANYON",     category: "Nature"      },
+  { word: "GLACIER",    category: "Nature"      },
+  // Space
+  { word: "GALAXY",     category: "Space"       },
+  { word: "NEBULA",     category: "Space"       },
+  { word: "ECLIPSE",    category: "Space"       },
+  { word: "ASTEROID",   category: "Space"       },
+  { word: "SUPERNOVA",  category: "Space"       },
+  // Music
+  { word: "SYMPHONY",   category: "Music"       },
+  { word: "RHYTHM",     category: "Music"       },
+  { word: "CLARINET",   category: "Music"       },
+  { word: "HARMONY",    category: "Music"       },
+];
+
+/* ═══════════════════════════════════════════════════
+   SECTION 2 — CONSTANTS
+   ═══════════════════════════════════════════════════ */
+
+// IDs of the SVG body parts, in the order they are revealed.
+// One part is revealed per wrong guess.
+const BODY_PARTS = [
+  "bp-head",   // 1st wrong guess
+  "bp-body",   // 2nd
+  "bp-larm",   // 3rd
+  "bp-rarm",   // 4th
+  "bp-lleg",   // 5th
+  "bp-rleg",   // 6th → game over
+];
+
+// Number of wrong guesses allowed before the game ends.
+const MAX_WRONG = 6;
+
+/* ═══════════════════════════════════════════════════
+   SECTION 3 — GAME STATE
+   All mutable variables are declared here so every
+   function in the file can read / write them.
+   ═══════════════════════════════════════════════════ */
+let currentWord  = "";    // the secret word (uppercase string)
+let category     = "";    // word's category label
+let wrongGuesses = 0;     // count of incorrect guesses so far
+let guessedRight = new Set(); // letters guessed correctly
+let guessedWrong = new Set(); // letters guessed incorrectly
+let gameActive   = false;     // set false while result banner is shown
+
+/* ═══════════════════════════════════════════════════
+   SECTION 4 — DOM REFERENCES
+   Grabbed once at load-time for performance.
+   ═══════════════════════════════════════════════════ */
+const livesPipsEl    = document.getElementById("lives-pips");
+const wrongCountEl   = document.getElementById("wrong-count");
+const correctCountEl = document.getElementById("correct-count");
+const categoryEl     = document.getElementById("category-text");
+const chipsWrapEl    = document.getElementById("chips-wrap");
+const slotsRowEl     = document.getElementById("slots-row");
+const keysGridEl     = document.getElementById("keys-grid");
+const statusCard     = document.getElementById("status-card");
+const statusIconEl   = document.getElementById("status-icon");
+const statusTitleEl  = document.getElementById("status-title");
+const statusSubEl    = document.getElementById("status-sub");
+const btnRestart     = document.getElementById("btn-restart");
+const hangmanSVG     = document.getElementById("hangman-svg");
+
+/* ═══════════════════════════════════════════════════
+   SECTION 5 — initGame()
+   Resets all state and rebuilds the entire UI.
+   Called once on page load, and again on restart.
+   ═══════════════════════════════════════════════════ */
+function initGame() {
+  // 5a. Pick a random word from the bank
+  const pick  = WORD_BANK[Math.floor(Math.random() * WORD_BANK.length)];
+  currentWord = pick.word;
+  category    = pick.category;
+
+  // 5b. Reset mutable game state
+  wrongGuesses = 0;
+  guessedRight.clear();
+  guessedWrong.clear();
+  gameActive = true;
+
+  // 5c. Reset SVG: remove "show" and "final" from every body part
+  BODY_PARTS.forEach(id => {
+    const el = document.getElementById(id);
+    el.classList.remove("show", "final");
+  });
+  // Remove shake from the SVG container
+  hangmanSVG.classList.remove("shake");
+
+  // 5d. Hide the win/lose banner
+  statusCard.style.display = "none";
+  statusCard.className = "status-card";
+
+  // 5e. Rebuild all UI sections
+  renderLives();
+  renderWordSlots();
+  renderKeyboard();
+  renderChips();
+
+  // 5f. Update static text
+  categoryEl.textContent    = category;
+  wrongCountEl.textContent  = "0";
+  correctCountEl.textContent = "0";
+}
+
+/* ═══════════════════════════════════════════════════
+   SECTION 6 — RENDER HELPERS
+   Each function redraws one UI section from scratch.
+   ═══════════════════════════════════════════════════ */
+
+/**
+ * renderLives()
+ * Draws MAX_WRONG gold pips. Pips beyond livesLeft get class "lost"
+ * which turns them grey and shrinks them (CSS transition).
+ */
+function renderLives() {
+  livesPipsEl.innerHTML = "";
+  const livesLeft = MAX_WRONG - wrongGuesses;
+
+  for (let i = 0; i < MAX_WRONG; i++) {
+    const pip = document.createElement("div");
+    pip.className = "pip" + (i < livesLeft ? "" : " lost");
+    pip.setAttribute("aria-label", i < livesLeft ? "life" : "lost life");
+    livesPipsEl.appendChild(pip);
+  }
+}
+
+/**
+ * renderWordSlots()
+ * Builds one .slot div per character in currentWord.
+ * Each slot has a .slot-letter (the character, hidden until guessed)
+ * and a .slot-line (the underscore).
+ * Already-revealed letters get class "revealed" immediately.
+ */
+function renderWordSlots() {
+  slotsRowEl.innerHTML = "";
+
+  [...currentWord].forEach(char => {
+    const isRevealed = guessedRight.has(char);
+
+    // Container div — stores data-char for quick targeting later
+    const slot = document.createElement("div");
+    slot.className   = "slot" + (isRevealed ? " revealed" : "");
+    slot.dataset.char = char;
+
+    // The letter itself (hidden until revealed)
+    const letter = document.createElement("div");
+    letter.className = "slot-letter" + (isRevealed ? " revealed" : "");
+    letter.textContent = char;
+    letter.setAttribute("aria-hidden", String(!isRevealed));
+
+    // Underscore line below the letter
+    const line = document.createElement("div");
+    line.className = "slot-line";
+
+    slot.appendChild(letter);
+    slot.appendChild(line);
+    slotsRowEl.appendChild(slot);
+  });
+
+  // Accessible label: announce what has been revealed
+  slotsRowEl.setAttribute("aria-label",
+    [...currentWord].map(c => guessedRight.has(c) ? c : "blank").join(" ")
+  );
+}
+
+/**
+ * renderKeyboard()
+ * Builds a clickable button for every letter A–Z.
+ * Already-guessed letters are disabled and styled.
+ */
+function renderKeyboard() {
+  keysGridEl.innerHTML = "";
+
+  for (let code = 65; code <= 90; code++) { // A=65, Z=90
+    const letter = String.fromCharCode(code);
+    const btn    = document.createElement("button");
+    btn.className    = "key";
+    btn.textContent  = letter;
+    btn.dataset.letter = letter;
+    btn.setAttribute("aria-label", `Guess letter ${letter}`);
+
+    // Apply correct/wrong styling if already guessed
+    if (guessedRight.has(letter)) { btn.classList.add("hit");  btn.disabled = true; }
+    if (guessedWrong.has(letter)) { btn.classList.add("miss"); btn.disabled = true; }
+
+    btn.addEventListener("click", () => handleGuess(letter));
+    keysGridEl.appendChild(btn);
+  }
+}
+
+/**
+ * renderChips()
+ * Draws all guessed letters as coloured chips (wrong = red, correct = green).
+ * Wrong letters are shown first so the "danger" count is prominent.
+ */
+function renderChips() {
+  chipsWrapEl.innerHTML = "";
+  guessedWrong.forEach(l => addChip(l, false));
+  guessedRight.forEach(l => addChip(l, true));
+}
+
+/**
+ * addChip(letter, correct)
+ * Appends a single chip span to the chips container.
+ */
+function addChip(letter, correct) {
+  const chip = document.createElement("span");
+  chip.className = "chip " + (correct ? "hit" : "miss");
+  chip.textContent = letter;
+  chip.setAttribute("aria-label", `${letter} – ${correct ? "correct" : "wrong"}`);
+  chipsWrapEl.appendChild(chip);
+}
+
+/* ═══════════════════════════════════════════════════
+   SECTION 7 — handleGuess(letter)
+   Core game logic. Called both by keyboard clicks
+   and physical keyboard events.
+   ═══════════════════════════════════════════════════ */
+function handleGuess(letter) {
+  // Guard clauses: do nothing if game is over or letter was already guessed
+  if (!gameActive) return;
+  if (guessedRight.has(letter) || guessedWrong.has(letter)) return;
+
+  const isCorrect = currentWord.includes(letter);
+
+  if (isCorrect) {
+    /* ── Correct guess ───────────────────────────── */
+    guessedRight.add(letter);
+
+    // Reveal every slot whose char matches the guessed letter.
+    // CSS transition handles the pop-in animation (translateY + scale).
+    document.querySelectorAll(".slot").forEach(slot => {
+      if (slot.dataset.char === letter) {
+        slot.classList.add("revealed");
+        const lEl = slot.querySelector(".slot-letter");
+        lEl.classList.add("revealed");
+        lEl.setAttribute("aria-hidden", "false");
+      }
+    });
+
+    // Update correct-guess counter
+    correctCountEl.textContent = guessedRight.size;
+
+  } else {
+    /* ── Wrong guess ─────────────────────────────── */
+    guessedWrong.add(letter);
+    wrongGuesses++;
+
+    // Reveal the next body part (index = wrongGuesses - 1)
+    const partId = BODY_PARTS[wrongGuesses - 1];
+    if (partId) {
+      const partEl = document.getElementById(partId);
+      partEl.classList.add("show");
+
+      // On the LAST wrong guess: add "final" class for flash animation
+      // and shake the entire SVG drawing.
+      if (wrongGuesses === MAX_WRONG) {
+        partEl.classList.add("final");
+
+        // Force reflow before re-adding "shake" so the animation
+        // restarts correctly even if the player restarts immediately.
+        hangmanSVG.classList.remove("shake");
+        void hangmanSVG.offsetWidth; // triggers reflow
+        hangmanSVG.classList.add("shake");
+      }
+    }
+
+    // Update wrong-guess counter
+    wrongCountEl.textContent = wrongGuesses;
+  }
+
+  // Disable the clicked keyboard button and apply hit/miss style
+  const btn = keysGridEl.querySelector(`[data-letter="${letter}"]`);
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add(isCorrect ? "hit" : "miss");
+  }
+
+  // Redraw life pips to reflect new wrong-guess count
+  renderLives();
+
+  // Add a chip for the guessed letter
+  addChip(letter, isCorrect);
+
+  // Check whether the game has ended (win or lose)
+  checkEndCondition();
+}
+
+/* ═══════════════════════════════════════════════════
+   SECTION 8 — checkEndCondition()
+   Decides if the round is over after every guess.
+   ═══════════════════════════════════════════════════ */
+function checkEndCondition() {
+  // WIN: every letter in currentWord appears in guessedRight
+  const allRevealed = [...currentWord].every(ch => guessedRight.has(ch));
+
+  if (allRevealed) {
+    gameActive = false;
+    // Small delay so the last letter's pop-in animation plays first
+    setTimeout(() => showResult("win"), 350);
+    return;
+  }
+
+  // LOSE: wrong guess count has reached the maximum
+  if (wrongGuesses >= MAX_WRONG) {
+    gameActive = false;
+
+    // Reveal the full word so the player can see what they missed
+    [...currentWord].forEach(ch => {
+      if (!guessedRight.has(ch)) {
+        guessedRight.add(ch);
+        document.querySelectorAll(`.slot[data-char="${ch}"]`).forEach(slot => {
+          slot.classList.add("revealed");
+          slot.querySelector(".slot-letter").classList.add("revealed");
+        });
+      }
+    });
+
+    // Delay banner so the shake / reveal animations play first
+    setTimeout(() => showResult("lose"), 700);
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   SECTION 9 — showResult(type)
+   Reveals the win or lose banner with appropriate text.
+   ═══════════════════════════════════════════════════ */
+function showResult(type) {
+  // Re-assigning className restarts the fadeUp CSS animation
+  statusCard.className     = "status-card " + type;
+  statusCard.style.display = "block";
+
+  if (type === "win") {
+    statusIconEl.textContent  = "🏆";
+    statusTitleEl.textContent = "You Win!";
+    statusSubEl.textContent   = `"${currentWord}" — brilliant!`;
+  } else {
+    statusIconEl.textContent  = "💀";
+    statusTitleEl.textContent = "Game Over";
+    statusSubEl.textContent   = `The word was "${currentWord}"`;
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   SECTION 10 — PHYSICAL KEYBOARD SUPPORT
+   Listens for keydown events on the document.
+   Only A–Z keys trigger a guess; all others are ignored.
+   ═══════════════════════════════════════════════════ */
+document.addEventListener("keydown", e => {
+  // Ignore key combos (Ctrl+C, Alt+Tab, etc.)
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+  const letter = e.key.toUpperCase();
+  // Test that it is exactly one letter A–Z
+  if (/^[A-Z]$/.test(letter)) handleGuess(letter);
+});
+
+/* ═══════════════════════════════════════════════════
+   SECTION 11 — RESTART BUTTON
+   ═══════════════════════════════════════════════════ */
+btnRestart.addEventListener("click", initGame);
+
+/* ═══════════════════════════════════════════════════
+   SECTION 12 — START FIRST GAME
+   ═══════════════════════════════════════════════════ */
+initGame();
+</script>
+</body>
+</html>
